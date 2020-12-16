@@ -24,6 +24,7 @@
     <ProjectGuid>{32be1868-0bb6-4789-bd41-467f6b8fddcf}</ProjectGuid>
     <RootNamespace>AdventofCode20202</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>AdventOfCode2020-2</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
