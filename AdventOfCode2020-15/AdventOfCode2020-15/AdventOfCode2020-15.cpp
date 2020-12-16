@@ -2,7 +2,6 @@
 //
 
 #include <iostream>
-#include <vector>
 #include <unordered_map>
 
 class LastLocations
@@ -38,8 +37,8 @@ private:
 int main()
 {
     // Input
-    std::unordered_map<unsigned int, LastLocations> answerLastLocation;
-    unsigned int previousAnswer = 0;
+    std::unordered_map<int, LastLocations> answerLastLocation;
+    int previousAnswer = 0;
     for (int input; std::cin >> input;)
     {
         previousAnswer = input;
@@ -52,7 +51,6 @@ int main()
     // Process
     for (unsigned int turn = answerLastLocation.size(); turn < 30000000; ++turn)
     {
-        const auto numberOfSameAnswers = answerLastLocation.count(previousAnswer);
         const auto it = answerLastLocation.find(previousAnswer);
         if (it != answerLastLocation.end() && it->second.HasMultipleEntries())
         {
