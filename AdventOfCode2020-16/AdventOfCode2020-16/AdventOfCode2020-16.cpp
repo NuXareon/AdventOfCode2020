@@ -172,7 +172,8 @@ void ProcessValidation(std::vector<bool>& validTickets, const std::vector<Ticket
     {
         for (;;)
         {
-            const unsigned int ticketId = nextTicket.fetch_add(1);      // Memory order is sequential
+            // We don't care about the order in which the tickets are asigned, only that they are correct
+            const unsigned int ticketId = nextTicket.fetch_add(1, std::memory_order_relaxed);
             if (ticketId >= nearbyTickets.size())
             {
                 return;
@@ -255,7 +256,8 @@ void ProcessRules(std::vector<std::set<size_t>>& validRulesPerField, const std::
     {
         for (;;)
         {
-            const unsigned int ticketId = nextTicket.fetch_add(1);      // Memory order is sequential
+            // We don't care about the order in which the tickets are asigned, only that they are correct
+            const unsigned int ticketId = nextTicket.fetch_add(1, std::memory_order_relaxed);
             if (ticketId >= nearbyTickets.size())
             {
                 return;
@@ -266,7 +268,7 @@ void ProcessRules(std::vector<std::set<size_t>>& validRulesPerField, const std::
                 continue;
             }
 
-            std::vector<std::vector<unsigned int>> valuesToDelete(validRulesPerField.size());
+            std::vector<std::vector<size_t>> valuesToDelete(validRulesPerField.size());
             bool allRulesResolved = true;
             const Ticket& ticket = nearbyTickets[ticketId];
             for (size_t i = 0; i < ticket.digits.size(); ++i)
