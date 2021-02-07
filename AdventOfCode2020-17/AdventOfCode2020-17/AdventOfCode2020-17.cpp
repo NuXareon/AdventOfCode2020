@@ -18,7 +18,7 @@ grid[w][z][y]       // Line
 grid[w][z][y][x]    // Object
 */
 using Grid = std::vector<std::vector<std::vector<std::vector<bool>>>>;
-
+/*
 void IncreaseGridSize(Grid& grid)
 {
     for (int i = 0; i < grid.size(); ++i)
@@ -42,7 +42,7 @@ void IncreaseGridSize(Grid& grid)
     grid.emplace(grid.begin(), grid[0].size(), std::vector<std::vector<bool>>(grid[0][0].size(), std::vector<bool>(grid[0][0][0].size(), false)));
     grid.emplace(grid.end(), grid[0].size(), std::vector<std::vector<bool>>(grid[0][0].size(), std::vector<bool>(grid[0][0][0].size(), false)));
 }
-
+*/
 void InitGrid(Grid& grid, size_t lineSize, unsigned int numIter)
 {
     // Beatiful, isn't it?
@@ -119,16 +119,15 @@ int main()
     constexpr unsigned int numIterations = 6;
 
     Grid grid;
-    //auto& newSuperPlane = grid.emplace_back();
-    //auto& newPlane = newSuperPlane.emplace_back();
-
     bool initialized = false;
 
+    size_t initialRowSize = 0;
     size_t rowIndex = numIterations;
     for (std::string input; std::getline(std::cin, input);)
     {
         if (!initialized)
         {
+            initialRowSize = input.size();
             InitGrid(grid, input.size(), numIterations);
             initialized = true;
         }
@@ -138,17 +137,11 @@ int main()
         auto& row = plane[rowIndex];
 
         size_t objectIndex = numIterations;
-        //auto& newRow = newPlane.emplace_back();
         for (const char c : input)
         {
             if (c == '#')
             {
                 row[objectIndex] = true;
-                //newRow.push_back(true);
-            }
-            else
-            {
-                //newRow.push_back(false);
             }
             ++objectIndex;
         }
@@ -161,19 +154,17 @@ int main()
     for (int n = 0; n < numIterations; ++n)
     {
         std::swap(oldGrid, grid);
-        //IncreaseGridSize(grid);
-        //IncreaseGridSize(oldGrid);
 
-        for (int i = 0; i < grid.size(); ++i)
+        for (unsigned int i = numIterations - n - 1; i <= numIterations + n + 1; ++i)
         {
             auto& superPlane = grid[i];
-            for (int j = 0; j < superPlane.size(); ++j)
+            for (unsigned int j = numIterations - n - 1; j <= numIterations + n + 1; ++j)
             {
                 auto& plane = superPlane[j];
-                for (int k = 0; k < plane.size(); ++k)
+                for (unsigned int k = numIterations - n - 1; k < numIterations + n + initialRowSize + 1; ++k)
                 {
                     auto& row = plane[k];
-                    for (int l = 0; l < row.size(); ++l)
+                    for (unsigned int l = numIterations - n - 1; l < numIterations + n + initialRowSize + 1; ++l)
                     {
                         row[l] = ProcessActive(oldGrid, i, j, k, l);
                     }
