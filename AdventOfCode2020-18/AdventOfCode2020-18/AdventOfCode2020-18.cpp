@@ -4,6 +4,8 @@
 #include <iostream>
 #include <string>
 #include <memory>
+#include <cassert>
+#include <optional>
 
 enum class OperationType
 {
@@ -13,85 +15,192 @@ enum class OperationType
 
 class BaseNode
 {
-
+public:
+    virtual int Process() = 0;
 };
 
 class OperationNode : public BaseNode
 {
 public:
-    OperationType m_opType;
-    std::unique_ptr<BaseNode> m_leftOperand;
-    std::unique_ptr<BaseNode> m_rightOperand;
-    std::unique_ptr<BaseNode> m_nextOp;
+    OperationNode(char c)
+    {
+        if (c == '+')
+        {
+            m_opType = OperationType::Sum;
+        }
+        else if (c == '*')
+        {
+            m_opType = OperationType::Mult;
+        }
+        else
+        {
+            assert(("Invalid operator", false));
+        }
+    }
+
+    int Process()
+    {
+        if (m_resultValue)
+        {
+            // Return result value if parents try to recalculate node
+            return *m_resultValue;
+        }
+
+        assert(m_leftOperand && m_rightOperand);
+        const auto leftResult = m_leftOperand->Process();
+        const auto rightResult = m_rightOperand->Process();
+
+        if (m_opType == OperationType::Sum)
+        {
+            m_resultValue = leftResult + rightResult;
+        }
+        else if (m_opType == OperationType::Mult)
+        {
+            m_resultValue = leftResult * rightResult;
+        }
+        else 
+        {
+            assert(false);
+        }
+
+        if (m_nextOp)
+        {
+            return m_nextOp->Process();
+        }
+
+        return *m_resultValue;
+    }
+
+    OperationType m_opType = OperationType::Sum;
+    // #TODO make share ptrs
+    BaseNode* m_leftOperand = nullptr;
+    BaseNode* m_rightOperand = nullptr;
+    BaseNode* m_nextOp = nullptr;
+
+    std::optional<int> m_resultValue;
 };
 
 class ValueNode : public BaseNode
 {
 public:
+    ValueNode(int value)
+        : m_value(value)
+    {
+
+    }
+
+    int Process() final
+    {
+        return m_value;
+    }
+
     int m_value;
 };
 
 class OperationGraph
 {
 public:
-    std::unique_ptr<BaseNode> m_start;
+    BaseNode* m_start = nullptr;
 };
 
-int main()
+std::pair<BaseNode*, std::string_view::const_iterator> ProcessInput(std::string_view inputLine)
 {
-    OperationGraph operations;
-    
-    std::string inputLine;
-    for (; std::getline(std::cin, inputLine);)
+    BaseNode* startingNode = nullptr;
+    ValueNode* leftValueNode = nullptr;
+    OperationNode* currentOperationNode = nullptr;
+
+    for (auto it = inputLine.begin(); it != inputLine.end(); it++)
     {
-        for (const auto& c : inputLine)
+        const auto c = *it;
+
+        if (c == ' ')
         {
-            std::unique_ptr<BaseNode> firstOperandValue;
+            continue;
+        }
+        if (c == '+' || c == '*')
+        {
+            // auto operationNode = std::make_unique<OperationNode>(c);
+            auto operationNode = new OperationNode(c);
 
-            if (c == '+' || c == '*')
+            // Insert left part of the operation if it exists
+            if (leftValueNode)
             {
-                auto operationNode = std::make_unique<OperationNode>();
-                if (c == '+')
-                {
-                    operationNode->m_opType = OperationType::Sum;
-                }
-                else
-                {
-                    operationNode->m_opType = OperationType::Mult;
-                }
+                operationNode->m_leftOperand = leftValueNode;
+                leftValueNode = nullptr;
+            }
 
-                // Insert left part of the operation if it exists
-                if (firstOperandValue)
-                {
-                    operationNode->m_leftOperand = std::move(operationNode);
-                }
+            // This should be exclusive of leftValueNode?
+            if (currentOperationNode)
+            {
+                currentOperationNode->m_nextOp = operationNode;
+                operationNode->m_leftOperand = currentOperationNode;
+            }
 
-                if (operations.m_start == nullptr)
-                {
-                    operations.m_start = std::move(operationNode);
-                }
+            currentOperationNode = operationNode;
 
-                // Insert Operation
-            }
-            else if (c == '(')
+            // Start with an operation
+            if (startingNode == nullptr)
             {
-                // Open parenthesis
+                startingNode = operationNode;
             }
-            else if (c == ')')
+            // Insert Operation
+        }
+        else if (c == '(')
+        {
+            // Process parentesis subtree and asign it as right hand operand
+            // TODO: This breask if there are more than 1 parentheses next to each other
+            assert(currentOperationNode);
+            auto parenthesisOpStart = it;
+            parenthesisOpStart++;
+            std::string_view newView(parenthesisOpStart, inputLine.end());
+            auto [rightNode, endIt] = ProcessInput(newView);
+            currentOperationNode->m_rightOperand = rightNode;
+            it += (endIt-newView.begin()+1);
+            // Open parenthesis
+        }
+        else if (c == ')')
+        {
+            // #TODO Might want to check for parenthesis missmatch here
+            return { startingNode, it };
+        }
+        else if (std::isdigit(static_cast<unsigned char>(c)))
+        {
+            // need to insert to right of operation if it exists
+            // check firstOperandValue == nullptr
+            //auto valueNode = std::make_unique<ValueNode>(std::atoi(&c));
+
+            auto valueNode = new ValueNode(std::atoi(&c));
+
+            if (currentOperationNode && currentOperationNode->m_rightOperand == nullptr)
             {
-                // Close parenthesis
+                assert(currentOperationNode->m_leftOperand != nullptr);
+                currentOperationNode->m_rightOperand = valueNode;
             }
-            else 
+            else
             {
-                // need to insert to right of operation if it exists
-                // check firstOperandValue == nullptr
-                auto valueNode = std::make_unique<ValueNode>();
-                valueNode->m_value = std::atoi(&c);
-                firstOperandValue = std::move(valueNode);
-                //It's a digit
+                // Store the value until we find an operand for it
+                assert(leftValueNode == nullptr);
+                leftValueNode = valueNode;
             }
+        }
+        else
+        {
+            assert(("Invalid input", false));
         }
     }
 
-    std::cout << "Hello World!\n";
+    return { startingNode, inputLine.end() };
+}
+
+int main()
+{
+    long long result = 0;
+    std::string inputLine;
+    for (; std::getline(std::cin, inputLine);)
+    {
+        const auto [startingNode, endIt] = ProcessInput(inputLine);
+        result += startingNode->Process();
+    }
+
+    std::cout << "Sum total = " << result << "\n";
 }
