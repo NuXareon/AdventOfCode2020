@@ -16,7 +16,7 @@ enum class OperationType
 class BaseNode
 {
 public:
-    virtual int Process() = 0;
+    virtual long long Process() = 0;
 };
 
 class OperationNode : public BaseNode
@@ -38,7 +38,7 @@ public:
         }
     }
 
-    int Process()
+    long long Process() final
     {
         if (m_resultValue)
         {
@@ -77,24 +77,24 @@ public:
     BaseNode* m_rightOperand = nullptr;
     BaseNode* m_nextOp = nullptr;
 
-    std::optional<int> m_resultValue;
+    std::optional<long long> m_resultValue;
 };
 
 class ValueNode : public BaseNode
 {
 public:
-    ValueNode(int value)
+    ValueNode(long long value)
         : m_value(value)
     {
 
     }
 
-    int Process() final
+    long long Process() final
     {
         return m_value;
     }
 
-    int m_value;
+    long long m_value;
 };
 
 class OperationGraph
@@ -106,8 +106,9 @@ public:
 std::pair<BaseNode*, std::string_view::const_iterator> ProcessInput(std::string_view inputLine)
 {
     BaseNode* startingNode = nullptr;
-    ValueNode* leftValueNode = nullptr;
+    BaseNode* leftValueNode = nullptr;
     OperationNode* currentOperationNode = nullptr;
+    OperationNode* currentOperationNodeBackup = nullptr;
 
     for (auto it = inputLine.begin(); it != inputLine.end(); it++)
     {
@@ -117,20 +118,90 @@ std::pair<BaseNode*, std::string_view::const_iterator> ProcessInput(std::string_
         {
             continue;
         }
+        if (c == '+')
+        {
+            auto operationNode = new OperationNode(c);
+
+            // Insert left part of the operation if it exists, either a value or the previous operation
+            if (leftValueNode)
+            {
+                assert(currentOperationNode == nullptr);
+                operationNode->m_leftOperand = leftValueNode;
+                leftValueNode = nullptr;
+            }
+            else if (currentOperationNode)
+            {
+                // sum has priority over multiplication, so swap the right nodes to process the sum first
+                if (currentOperationNode->m_opType == OperationType::Mult)
+                {
+                    currentOperationNodeBackup = currentOperationNode;
+                    operationNode->m_leftOperand = currentOperationNodeBackup->m_rightOperand;
+                    /*
+                    if (auto operationRight = dynamic_cast<OperationNode*>(currentOperationNodeBackup->m_rightOperand))
+                    {
+                        operationRight->m_nextOp = operationNode;
+                    }
+                    */
+                    currentOperationNodeBackup->m_rightOperand = operationNode;
+                }
+                else
+                {
+                    currentOperationNode->m_nextOp = operationNode;
+                    operationNode->m_leftOperand = currentOperationNode;
+                }
+            }
+
+            currentOperationNode = operationNode;
+
+            if (startingNode == nullptr)
+            {
+                startingNode = operationNode;
+            }
+        }
+        else if (c == '*')
+        {
+            auto operationNode = new OperationNode(c);
+
+            // Insert left part of the operation if it exists, either a value or the previous operation
+            if (leftValueNode)
+            {
+                assert(currentOperationNode == nullptr);
+                operationNode->m_leftOperand = leftValueNode;
+                leftValueNode = nullptr;
+            }
+            else if (currentOperationNode)
+            {
+                if (currentOperationNode->m_opType == OperationType::Sum && currentOperationNodeBackup)
+                {
+                    currentOperationNode = currentOperationNodeBackup;
+                    currentOperationNodeBackup = nullptr;
+                }
+
+                currentOperationNode->m_nextOp = operationNode;
+                operationNode->m_leftOperand = currentOperationNode;
+            }
+
+            currentOperationNode = operationNode;
+
+            if (startingNode == nullptr)
+            {
+                startingNode = operationNode;
+            }
+        }
+        /*
         if (c == '+' || c == '*')
         {
             // auto operationNode = std::make_unique<OperationNode>(c);
             auto operationNode = new OperationNode(c);
 
-            // Insert left part of the operation if it exists
+            // Insert left part of the operation if it exists, either a value or the previous operation
             if (leftValueNode)
             {
+                assert(currentOperationNode == nullptr);
                 operationNode->m_leftOperand = leftValueNode;
                 leftValueNode = nullptr;
             }
-
-            // This should be exclusive of leftValueNode?
-            if (currentOperationNode)
+            else if (currentOperationNode)
             {
                 currentOperationNode->m_nextOp = operationNode;
                 operationNode->m_leftOperand = currentOperationNode;
@@ -145,22 +216,28 @@ std::pair<BaseNode*, std::string_view::const_iterator> ProcessInput(std::string_
             }
             // Insert Operation
         }
+        */
         else if (c == '(')
         {
-            // Process parentesis subtree and asign it as right hand operand
-            // TODO: This breask if there are more than 1 parentheses next to each other
-            assert(currentOperationNode);
+            // Process parenthesis subtree recursively
             auto parenthesisOpStart = it;
             parenthesisOpStart++;
             std::string_view newView(parenthesisOpStart, inputLine.end());
-            auto [rightNode, endIt] = ProcessInput(newView);
-            currentOperationNode->m_rightOperand = rightNode;
+            auto [subOperationStart, endIt] = ProcessInput(newView);
+
+            if (currentOperationNode)
+            {
+                currentOperationNode->m_rightOperand = subOperationStart;
+            }
+            else
+            {
+                leftValueNode = subOperationStart;
+            }
+
             it += (endIt-newView.begin()+1);
-            // Open parenthesis
         }
         else if (c == ')')
         {
-            // #TODO Might want to check for parenthesis missmatch here
             return { startingNode, it };
         }
         else if (std::isdigit(static_cast<unsigned char>(c)))
@@ -187,6 +264,12 @@ std::pair<BaseNode*, std::string_view::const_iterator> ProcessInput(std::string_
         {
             assert(("Invalid input", false));
         }
+    }
+
+    if (startingNode == nullptr)
+    {
+        // Case where we have a single operations surrounded by parentheses: (a + b)
+        startingNode = leftValueNode;
     }
 
     return { startingNode, inputLine.end() };
