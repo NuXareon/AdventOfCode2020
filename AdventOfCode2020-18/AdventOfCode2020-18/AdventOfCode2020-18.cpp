@@ -6,6 +6,10 @@
 #include <memory>
 #include <cassert>
 #include <optional>
+#include <thread>
+#include <vector>
+#include <mutex>
+#include <atomic>
 
 enum class OperationType
 {
@@ -16,6 +20,7 @@ enum class OperationType
 class BaseNode
 {
 public:
+    virtual ~BaseNode() = default;
     virtual long long Process() = 0;
 };
 
@@ -38,11 +43,29 @@ public:
         }
     }
 
+    // A bit old school. Could use some sort of smart pointer but raw pointers are fastest - specially since we can't use unique_ptr because of circular dependencies, which also make using shared_ptr a bit awkward.
+    ~OperationNode()
+    {
+        // Break circular pointer references
+        if (m_nextOp && m_nextOp->m_leftOperand == this)
+        {
+            m_nextOp->m_leftOperand = nullptr;
+        }
+
+        // Deallocate children
+        delete m_leftOperand;
+        m_leftOperand = nullptr;
+        delete m_rightOperand;
+        m_rightOperand = nullptr;
+        delete m_nextOp;
+        m_nextOp = nullptr;
+    }
+
     long long Process() final
     {
         if (m_resultValue)
         {
-            // Return result value if parents try to recalculate node
+            // Return result value if we have already calculated it. This happens when a "next operation" node tries to evaluate it's left side argument.
             return *m_resultValue;
         }
 
@@ -60,7 +83,7 @@ public:
         }
         else 
         {
-            assert(false);
+            assert(("Invalid operator", false));
         }
 
         if (m_nextOp)
@@ -72,11 +95,12 @@ public:
     }
 
     OperationType m_opType = OperationType::Sum;
-    // #TODO make share ptrs
+
     BaseNode* m_leftOperand = nullptr;
     BaseNode* m_rightOperand = nullptr;
-    BaseNode* m_nextOp = nullptr;
+    OperationNode* m_nextOp = nullptr;
 
+private:
     std::optional<long long> m_resultValue;
 };
 
@@ -94,15 +118,11 @@ public:
         return m_value;
     }
 
+private:
     long long m_value;
 };
 
-class OperationGraph
-{
-public:
-    BaseNode* m_start = nullptr;
-};
-
+// This function ended up being a bit messy and could use some cleanup
 std::pair<BaseNode*, std::string_view::const_iterator> ProcessInput(std::string_view inputLine)
 {
     BaseNode* startingNode = nullptr;
@@ -136,12 +156,6 @@ std::pair<BaseNode*, std::string_view::const_iterator> ProcessInput(std::string_
                 {
                     currentOperationNodeBackup = currentOperationNode;
                     operationNode->m_leftOperand = currentOperationNodeBackup->m_rightOperand;
-                    /*
-                    if (auto operationRight = dynamic_cast<OperationNode*>(currentOperationNodeBackup->m_rightOperand))
-                    {
-                        operationRight->m_nextOp = operationNode;
-                    }
-                    */
                     currentOperationNodeBackup->m_rightOperand = operationNode;
                 }
                 else
@@ -188,35 +202,6 @@ std::pair<BaseNode*, std::string_view::const_iterator> ProcessInput(std::string_
                 startingNode = operationNode;
             }
         }
-        /*
-        if (c == '+' || c == '*')
-        {
-            // auto operationNode = std::make_unique<OperationNode>(c);
-            auto operationNode = new OperationNode(c);
-
-            // Insert left part of the operation if it exists, either a value or the previous operation
-            if (leftValueNode)
-            {
-                assert(currentOperationNode == nullptr);
-                operationNode->m_leftOperand = leftValueNode;
-                leftValueNode = nullptr;
-            }
-            else if (currentOperationNode)
-            {
-                currentOperationNode->m_nextOp = operationNode;
-                operationNode->m_leftOperand = currentOperationNode;
-            }
-
-            currentOperationNode = operationNode;
-
-            // Start with an operation
-            if (startingNode == nullptr)
-            {
-                startingNode = operationNode;
-            }
-            // Insert Operation
-        }
-        */
         else if (c == '(')
         {
             // Process parenthesis subtree recursively
@@ -242,10 +227,6 @@ std::pair<BaseNode*, std::string_view::const_iterator> ProcessInput(std::string_
         }
         else if (std::isdigit(static_cast<unsigned char>(c)))
         {
-            // need to insert to right of operation if it exists
-            // check firstOperandValue == nullptr
-            //auto valueNode = std::make_unique<ValueNode>(std::atoi(&c));
-
             auto valueNode = new ValueNode(std::atoi(&c));
 
             if (currentOperationNode && currentOperationNode->m_rightOperand == nullptr)
@@ -277,13 +258,88 @@ std::pair<BaseNode*, std::string_view::const_iterator> ProcessInput(std::string_
 
 int main()
 {
-    long long result = 0;
+    std::atomic<bool> finished = false;
+    std::atomic<long long> result = 0;
     std::string inputLine;
-    for (; std::getline(std::cin, inputLine);)
+
+    bool inputReady = false;
+    std::mutex inputMutexThread;
+    std::mutex inputMutexMain;
+    std::condition_variable cv_thread;
+    std::condition_variable cv_main;
+
+    constexpr unsigned int numthreads = 8;
+    std::vector<std::thread> threads;
+
+    for (unsigned int i = 0; i < numthreads; ++i)
     {
-        const auto [startingNode, endIt] = ProcessInput(inputLine);
-        result += startingNode->Process();
+        threads.emplace_back([&result, &inputLine, &inputReady, &inputMutexThread, &inputMutexMain, &cv_thread, &cv_main, &finished]()
+            {
+                for (;;)
+                {
+                    // Wait for main to provide an input
+                    std::unique_lock inputLock(inputMutexThread);
+                    cv_thread.wait(inputLock, [&inputReady, &finished]() { return inputReady || finished; });
+
+                    if (finished)
+                    {
+                        return;
+                    }
+
+                    // Consume the input
+                    const std::string inputLineCopy = inputLine;
+
+                    {
+                        std::lock_guard<std::mutex> lk(inputMutexMain);
+                        inputReady = false;
+                    }
+
+                    inputLock.unlock();
+
+                    // Notify main we can read the next line
+                    cv_main.notify_one();
+
+                    // Process this line
+                    const auto [startingNode, endIt] = ProcessInput(inputLineCopy);
+                    result.fetch_add(startingNode->Process(), std::memory_order_relaxed);
+
+                    delete startingNode;
+                }
+            });
     }
 
+
+    for (; std::getline(std::cin, inputLine);)
+    {
+        if (inputLine == "")
+        {
+            continue;
+        }
+
+        // Notify thread of new input
+        {
+            std::lock_guard<std::mutex> lk(inputMutexThread);
+            inputReady = true;
+        }
+
+        cv_thread.notify_one();
+
+        // Block main thread while worker is reading input
+        std::unique_lock inputLock(inputMutexMain);
+        cv_main.wait(inputLock, [&inputReady]() {return !inputReady; });
+    }
+
+    {
+        std::lock_guard<std::mutex> lk(inputMutexThread);
+        finished = true;
+    }
+    cv_thread.notify_all();
+
+    for (auto& thread : threads)
+    {
+        thread.join();
+    }
+
+    // Right now we have some sort of race condition since we get different results
     std::cout << "Sum total = " << result << "\n";
 }
